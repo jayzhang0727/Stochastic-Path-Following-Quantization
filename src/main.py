@@ -105,7 +105,7 @@ def main(b, ba, mlp_s, cnn_s, bs, mlp_per, cnn_per, l):
         
     print('\nQuantization hyperparameters:')
     print(f'Quantizing {args.model} on {device} with\n\t  dataset: {args.data_set}, bits: {bits}, bits_act: {bits_act}, mlp_scalar: {mlp_scalar}, cnn_scalar: {cnn_scalar}, mlp_percentile: {mlp_percentile}, \
-        \n\tcnn_percentile: {cnn_percentile}, retain_rate: {args.retain_rate}, batch_size: {batch_size}, calib_bs: {calib_bs}\n')
+        \n\tcnn_percentile: {cnn_percentile}, retain_rate: {args.retain_rate}, batch_size: {batch_size}, calib_bs: {calib_bs}, order: {order}\n')
     
     
     # load the data loader for training and testing

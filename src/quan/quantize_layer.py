@@ -166,15 +166,15 @@ def quantize_layer(W, analog_layer_input, quantized_layer_input, m,
     N, d = W.shape  # N is the number of neurons, d is the neuron dimension
     Q = torch.zeros_like(W) # quantized weights
     U = torch.zeros(N, m).to(device)   # quantization error vectors
-
+    
     if order == 1:  
         rad = torch.quantile(torch.abs(W), percentile, axis=1).mean()
     else:
         W_align, U_align = data_alignment(W, U, order, analog_layer_input, quantized_layer_input)
         rad = torch.quantile(torch.abs(W_align), percentile, axis=1).mean()
 
-    step_size = step_size * rad - lamb / boundary_idx if reg == 'L0' else step_size * rad  
-
+    step_size = step_size * rad - lamb / boundary_idx if reg == 'L0' else step_size * rad 
+    
     if reg == 'L1':
         quantizer = soft_thresholding_msq
 
