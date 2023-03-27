@@ -48,7 +48,7 @@ def data_loader(ds_name, batch_size, num_workers):
     Prepare data loaders
     """
     if ds_name == 'ILSVRC2012':
-        data_dir = '../data/ILSVRC2012'  # customize the data path before run the code 
+        data_dir = '/home/paperspace/datasets/ILSVRC2012'  # customize the data path before run the code 
 
         if not os.path.isdir(data_dir):
             raise Exception('Please download Imagenet2012 dataset!')

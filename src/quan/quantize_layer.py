@@ -229,7 +229,7 @@ def quantize_layer(W, analog_layer_input, quantized_layer_input, m,
                 quantize_error += torch.linalg.norm(U[i].T, ord='fro') 
                 relative_quantize_error += torch.linalg.norm(U[i].T, ord='fro') / torch.linalg.norm(analog_layer_input[:,i,:] @ W[i].T, ord='fro')
             else:
-                quantization_with_alignment(W_align[i], Q[i], U[i], quantized_layer_input, quantizer, 
+                quantization_with_alignment(W_align[i], Q[i], U[i], quantized_layer_input[:,i,:], quantizer, 
                                 step_size, boundary_idx, lamb)
                 U[i] += U_align[i]
                 quantize_error += torch.linalg.norm(U[i].T, ord='fro') 
@@ -241,8 +241,11 @@ def quantize_layer(W, analog_layer_input, quantized_layer_input, m,
         relative_adder = None
 
         Q = Q.view(-1, Q.shape[-1])
+
+    if order > 1:
+        del U_align, W_align
     
-    del U, U_align, W_align
+    del U
     torch.cuda.empty_cache()
     gc.collect() 
     return Q, quantize_error, relative_quantize_error, quantize_adder, relative_adder
