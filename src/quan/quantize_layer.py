@@ -5,6 +5,37 @@ from tqdm import tqdm
 from .quantizer import *
 
 
+def data_alignment(W, U, order, analog_layer_input, quantized_layer_input):
+    W_align = torch.zeros_like(W)  # new weights 
+    U_align = torch.zeros_like(U)  # error results from alignment 
+    d = W.shape[1]  # neuron dimension 
+
+    # data alignment 
+    for r in tqdm(range(order)):
+        if r == 0: 
+            for t in range(d):
+                U_align += W[:, t].unsqueeze(1) * analog_layer_input[:, t].unsqueeze(0)
+                norm = torch.linalg.norm(quantized_layer_input[:, t], 2) ** 2
+                if norm > 0:
+                    W_align[:, t] = U_align.matmul(quantized_layer_input[:, t]) / norm
+                else: 
+                    W_align[:, t] = torch.zeros_like(U_align[:, 0])
+                U_align -= W_align[:, t].unsqueeze(1) * quantized_layer_input[:, t].unsqueeze(0) 
+        
+        else:
+            for t in range(d * r, d * (r + 1)):
+                mod = t % d
+                U_align += W_align[:, mod].unsqueeze(1) * quantized_layer_input[:, mod].unsqueeze(0) 
+                norm = torch.linalg.norm(quantized_layer_input[:, mod], 2) ** 2
+                if norm > 0:
+                    W_align[:, mod] = U_align.matmul(quantized_layer_input[:, mod]) / norm
+                else: 
+                    W_align[:, mod] = torch.zeros_like(U_align[:, 0])
+                U_align -= W_align[:, mod].unsqueeze(1) * quantized_layer_input[:, mod].unsqueeze(0)
+
+    return W_align, U_align
+
+
 def quantization(W, Q, U, analog_layer_input, quantized_layer_input, quantizer, 
                   step_size, boundary_idx, lamb):
     '''
@@ -47,8 +78,8 @@ def quantization(W, Q, U, analog_layer_input, quantized_layer_input, quantizer,
         U -= Q[:, t].unsqueeze(1) * quantized_layer_input[:, t].unsqueeze(0)
 
 
-def quantization_with_alignment(W, Q, U, order, analog_layer_input, quantized_layer_input, quantizer, 
-                  step_size, boundary_idx, lamb):
+def quantization_with_alignment(W_align, Q, U, quantized_layer_input, quantizer, 
+                                step_size, boundary_idx, lamb):
     '''
     Quantize the whole layer.
 
@@ -80,35 +111,7 @@ def quantization_with_alignment(W, Q, U, order, analog_layer_input, quantized_la
         Whether or not to use stochastic quantization
     '''
 
-    W_align = torch.zeros_like(W)  # new weights 
-    U_align = torch.zeros_like(U)  # error results from alignment 
-    d = W.shape[1]  # neuron dimension 
-
-    # data alignment 
-    for r in tqdm(range(order)):
-        if r == 0: 
-            for t in range(d):
-                U_align += W[:, t].unsqueeze(1) * analog_layer_input[:, t].unsqueeze(0)
-                norm = torch.linalg.norm(quantized_layer_input[:, t], 2) ** 2
-                if norm > 0:
-                    W_align[:, t] = U_align.matmul(quantized_layer_input[:, t]) / norm
-                else: 
-                    W_align[:, t] = torch.zeros_like(U_align[:, 0])
-                U_align -= W_align[:, t].unsqueeze(1) * quantized_layer_input[:, t].unsqueeze(0) 
-        
-        else:
-            for t in range(d * r, d * (r + 1)):
-                mod = t % d
-                U_align += W_align[:, mod].unsqueeze(1) * quantized_layer_input[:, mod].unsqueeze(0) 
-                norm = torch.linalg.norm(quantized_layer_input[:, mod], 2) ** 2
-                if norm > 0:
-                    W_align[:, mod] = U_align.matmul(quantized_layer_input[:, mod]) / norm
-                else: 
-                    W_align[:, mod] = torch.zeros_like(U_align[:, 0])
-                U_align -= W_align[:, mod].unsqueeze(1) * quantized_layer_input[:, mod].unsqueeze(0)
-    
-    # quantization
-    for t in tqdm(range(d)):
+    for t in tqdm(range(W_align.shape[1])):
         norm = torch.linalg.norm(quantized_layer_input[:, t], 2) ** 2
         if norm > 0:
             q_arg = W_align[:, t] + U.matmul(quantized_layer_input[:, t]) / norm
@@ -116,12 +119,6 @@ def quantization_with_alignment(W, Q, U, order, analog_layer_input, quantized_la
             q_arg = W_align[:, t]
         Q[:, t] = quantizer(step_size, q_arg, boundary_idx, lamb)
         U += (W_align[:, t] - Q[:, t]).unsqueeze(1) * quantized_layer_input[:, t].unsqueeze(0)
-    
-    U += U_align  # accumulate the error 
-
-    del W_align, U_align
-    torch.cuda.empty_cache()
-    gc.collect() 
 
 
 def quantize_layer(W, analog_layer_input, quantized_layer_input, m, 
@@ -166,12 +163,17 @@ def quantize_layer(W, analog_layer_input, quantized_layer_input, m,
     float
         The relative quantize error.
     '''
-    rad = torch.quantile(torch.abs(W), percentile, axis=1).mean()
-    step_size = step_size * rad - lamb / boundary_idx if reg == 'L0' else step_size * rad  
-
     N, d = W.shape  # N is the number of neurons, d is the neuron dimension
     Q = torch.zeros_like(W) # quantized weights
     U = torch.zeros(N, m).to(device)   # quantization error vectors
+
+    if order == 1:  
+        rad = torch.quantile(torch.abs(W), percentile, axis=1).mean()
+    else:
+        W_align, U_align = data_alignment(W, U, order, analog_layer_input, quantized_layer_input)
+        rad = torch.quantile(torch.abs(W_align), percentile, axis=1).mean()
+
+    step_size = step_size * rad - lamb / boundary_idx if reg == 'L0' else step_size * rad  
 
     if reg == 'L1':
         quantizer = soft_thresholding_msq
@@ -192,9 +194,10 @@ def quantize_layer(W, analog_layer_input, quantized_layer_input, m,
             quantization(W, Q, U, analog_layer_input, quantized_layer_input, quantizer, 
                     step_size, boundary_idx, lamb)
         else:
-            quantization_with_alignment(W, Q, U, order, analog_layer_input, quantized_layer_input, quantizer, 
-                    step_size, boundary_idx, lamb)
-
+            quantization_with_alignment(W_align, Q, U, quantized_layer_input, quantizer, 
+                                step_size, boundary_idx, lamb)
+            U += U_align 
+        
         quantize_adder = U.T
         relative_adder = torch.linalg.norm(quantize_adder, axis=0) / (torch.linalg.norm(analog_layer_input @ W.T, axis=0) + 1e-5)
         quantize_error = torch.linalg.norm(quantize_adder, ord='fro')
@@ -202,9 +205,14 @@ def quantize_layer(W, analog_layer_input, quantized_layer_input, m,
 
     else:
         # Q shape = (out_channels, in_channels/groups*k_size[0]*k_size[1])
-        W = W.view(groups, -1, W.shape[-1]) 
         Q = Q.view(groups, -1, Q.shape[-1]) #  shape (groups, out_channels/groups, in_channesl/groups*k_size[0]*k_size[1])
         U = U.view(groups, -1, U.shape[-1]) #  shape (groups, out_channels/groups, m)
+
+        if order == 1:
+            W = W.view(groups, -1, W.shape[-1]) 
+        else:
+            W_align = W_align.view(groups, -1, W_align.shape[-1]) 
+            U_align = U_align.view(groups, -1, U_align.shape[-1]) 
 
         dims = analog_layer_input.shape # shape (B*L, in_channels*kernel_size[0]*kernel_size[1])
         analog_layer_input = analog_layer_input.view(dims[0], groups, -1)
@@ -218,13 +226,15 @@ def quantize_layer(W, analog_layer_input, quantized_layer_input, m,
             if order == 1:
                 quantization(W[i], Q[i], U[i], analog_layer_input[:,i,:], quantized_layer_input[:,i,:], quantizer, 
                     step_size, boundary_idx, lamb)
+                quantize_error += torch.linalg.norm(U[i].T, ord='fro') 
+                relative_quantize_error += torch.linalg.norm(U[i].T, ord='fro') / torch.linalg.norm(analog_layer_input[:,i,:] @ W[i].T, ord='fro')
             else:
-                quantization_with_alignment(W[i], Q[i], U[i], order, analog_layer_input[:,i,:], quantized_layer_input[:,i,:], quantizer, 
-                    step_size, boundary_idx, lamb)
+                quantization_with_alignment(W_align[i], Q[i], U[i], quantized_layer_input, quantizer, 
+                                step_size, boundary_idx, lamb)
+                U[i] += U_align[i]
+                quantize_error += torch.linalg.norm(U[i].T, ord='fro') 
+                relative_quantize_error += torch.linalg.norm(U[i].T, ord='fro') / torch.linalg.norm(analog_layer_input[:,i,:] @ W_align[i].T, ord='fro')
             
-            quantize_error += torch.linalg.norm(U[i].T, ord='fro') 
-            relative_quantize_error += torch.linalg.norm(U[i].T, ord='fro') / torch.linalg.norm(analog_layer_input[:,i,:] @ W[i].T, ord='fro')
-
         quantize_error = quantize_error / groups
         relative_quantize_error = relative_quantize_error / groups
         quantize_adder = None 
@@ -232,7 +242,7 @@ def quantize_layer(W, analog_layer_input, quantized_layer_input, m,
 
         Q = Q.view(-1, Q.shape[-1])
     
-    del U
+    del U, U_align, W_align
     torch.cuda.empty_cache()
     gc.collect() 
     return Q, quantize_error, relative_quantize_error, quantize_adder, relative_adder
