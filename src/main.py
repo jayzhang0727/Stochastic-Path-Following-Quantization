@@ -24,7 +24,7 @@ parser.add_argument('--batch_size', '-bs', default=[128], type=int, nargs='+',
                     help='batch size used for quantization')
 parser.add_argument('--percentile', '-p', default=[1], type=float, nargs='+',
                     help='percentile of weights')
-parser.add_argument('--num_worker', '-w', default=8, type=int, 
+parser.add_argument('--num_worker', '-w', default=6, type=int, 
                     help='number of workers for data loader')
 parser.add_argument('--data_set', '-ds', default='ILSVRC2012', choices=['ILSVRC2012', 'CIFAR10'],
                     help='dataset used for quantization')
@@ -43,7 +43,7 @@ parser.add_argument('-seed', default=0, type=int, help='set random seed')
 parser.add_argument('-r', default=1, type=int, help='order of data alignment')
 parser.add_argument('--fusion', '-f', action='store_true', help='fusing CNN and BN layers')
 parser.add_argument('--quan_act', '-a', action='store_true', help='quantize activations')
-parser.add_argument('--calib_bs', default=1024, type=int, help='batch size of calibration data')
+parser.add_argument('--calib_bs', default=2048, type=int, help='batch size of calibration data')
 parser.add_argument('--store_quan', '-store', action='store_true', help='store the quantized model')
 
 args = parser.parse_args()
@@ -113,7 +113,7 @@ def main(b, ba, mlp_s, cnn_s, bs, mlp_per, cnn_per, l):
     
     # calibration data for activation quantization
     if quan_act:
-        calib_loader, _ = data_loader(args.data_set, calib_bs, args.num_worker)
+        calib_loader, _ = data_loader(args.data_set, calib_bs, 0)
     else:
         calib_loader = None
     

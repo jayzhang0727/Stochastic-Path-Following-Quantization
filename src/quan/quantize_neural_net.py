@@ -7,7 +7,7 @@ import copy
 import gc
 
 from tqdm import tqdm
-from ..utils import InterruptException, extract_layers
+from utils import InterruptException, extract_layers
 from .quantize_layer import quantize_layer
 from .quantizer import msq
 
