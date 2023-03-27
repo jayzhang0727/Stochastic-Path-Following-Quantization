@@ -40,6 +40,7 @@ parser.add_argument('--lamb', '-l', default=[0.1], type=float, nargs='+',
 parser.add_argument('--ignore_layer', '-ig', default=[], type=int, nargs='+',
                     help='indices of unquantized layers')
 parser.add_argument('-seed', default=0, type=int, help='set random seed')
+parser.add_argument('-r', default=1, type=int, help='order of data alignment')
 parser.add_argument('--fusion', '-f', action='store_true', help='fusing CNN and BN layers')
 parser.add_argument('--quan_act', '-a', action='store_true', help='quantize activations')
 parser.add_argument('--calib_bs', default=1024, type=int, help='batch size of calibration data')
@@ -60,6 +61,7 @@ def main(b, ba, mlp_s, cnn_s, bs, mlp_per, cnn_per, l):
     lamb = l
     quan_act = args.quan_act
     stochastic = args.stochastic_quantization
+    order = args.r
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     
     np.random.seed(args.seed)
@@ -131,6 +133,7 @@ def main(b, ba, mlp_s, cnn_s, bs, mlp_per, cnn_per, l):
                                     retain_rate=args.retain_rate,
                                     stochastic_quantization=stochastic,
                                     quan_act = quan_act,
+                                    order = order, 
                                     device = device,
                                     calib_loader = calib_loader
                                     )
@@ -144,11 +147,11 @@ def main(b, ba, mlp_s, cnn_s, bs, mlp_per, cnn_per, l):
         if args.quan_act:
             saved_model_name = f'ds{args.data_set}_b{bits}_ba{bits_act}_batch{batch_size}_calib{calib_bs}\
             _mlpscalar{mlp_scalar}_cnnscalar{cnn_scalar}_mlppercentile{mlp_percentile}_cnnpercentile{cnn_percentile}\
-            _retain_rate{args.retain_rate}_reg{args.regularizer}_lambda{lamb}.pt'
+            _retain_rate{args.retain_rate}_reg{args.regularizer}_lambda{lamb}_order{order}.pt'
         else:
             saved_model_name = f'ds{args.data_set}_b{bits}_batch{batch_size}_mlpscalar{mlp_scalar}_cnnscalar{cnn_scalar}\
             _mlppercentile{mlp_percentile}_cnnpercentile{cnn_percentile}_retain_rate{args.retain_rate}\
-            _reg{args.regularizer}_lambda{lamb}.pt'
+            _reg{args.regularizer}_lambda{lamb}_order{order}.pt'
 
         if not os.path.isdir('../quantized_models/'):
             os.mkdir('../quantized_models/')
@@ -189,7 +192,7 @@ def main(b, ba, mlp_s, cnn_s, bs, mlp_per, cnn_per, l):
         csv_writer = csv.writer(f)
         row = [
             args.model, args.data_set, batch_size, args.quan_act, calib_bs,
-            args.ignore_layer, original_topk_accuracy[0], topk_accuracy[0], 
+            args.ignore_layer, order, original_topk_accuracy[0], topk_accuracy[0], 
             original_topk_accuracy[1], topk_accuracy[1], 
             bits, bits_act, mlp_scalar, cnn_scalar, 
             mlp_percentile, cnn_percentile, stochastic,

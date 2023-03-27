@@ -5,7 +5,7 @@ import os
 log_file_name = 'Quantization_Log.csv'
 
 fields = ['Model Name', 'Dataset', 'Quantization Batch Size', 'Quantize Activation', 'Calibration Batch Size', 'Ignored layers', 
-          'Original Top1 Accuracy', 'Quantized Top1 Accuracy', 'Original Top5 Accuracy', 'Quantized Top5 Accuracy', 
+          'Order', 'Original Top1 Accuracy', 'Quantized Top1 Accuracy', 'Original Top5 Accuracy', 'Quantized Top5 Accuracy', 
           'Bits', 'Bits_act', 'MLP_Alphabet_Scalar', 'CNN_Alphabet_Scalar', 'MLP_Percentile', 'CNN_Percentile',
           'Stochastic Quantization', 'Regularizer', 'Lambda', 'Original Sparsity',
           'Quantized Sparsity', 'Retain_rate', 'Fusion', 'Seed']

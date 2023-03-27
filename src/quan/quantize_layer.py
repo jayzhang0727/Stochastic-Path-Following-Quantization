@@ -18,8 +18,6 @@ def quantization(W, Q, U, analog_layer_input, quantized_layer_input, quantizer,
         The quantized weights with same shape as W.
     U : torch.Tensor 
         Quantization error matrix.
-    neuron_idx: int
-        The position of the neuron in the layer.
     analog_layer_input: numpy.array,
         The input for the layer of analog network.
     quantized_layer_input: numpy.array,
@@ -49,9 +47,86 @@ def quantization(W, Q, U, analog_layer_input, quantized_layer_input, quantizer,
         U -= Q[:, t].unsqueeze(1) * quantized_layer_input[:, t].unsqueeze(0)
 
 
+def quantization_with_alignment(W, Q, U, order, analog_layer_input, quantized_layer_input, quantizer, 
+                  step_size, boundary_idx, lamb):
+    '''
+    Quantize the whole layer.
+
+    Parameters
+    -----------
+    W : torch.Tensor 
+        The weights for the layer.
+    Q : torch.Tensor 
+        The quantized weights with same shape as W.
+    U : torch.Tensor 
+        Quantization error matrix.
+    order: int
+        The order of data alignment process.
+    analog_layer_input: numpy.array,
+        The input for the layer of analog network.
+    quantized_layer_input: numpy.array,
+        The input for the layer of quantized network.
+    m : int
+        The batch size (num of input).
+    step_size: float
+        The step size of the alphabet
+    boundary_idx: int
+        The max idx of the alphebt to not go over
+    reg: str
+        The type of regularizer to be used.
+    lamb: float
+        The lambda for regularization.
+    stochastic_quantization: bool
+        Whether or not to use stochastic quantization
+    '''
+
+    W_align = torch.zeros_like(W)  # new weights 
+    U_align = torch.zeros_like(U)  # error results from alignment 
+    d = W.shape[1]  # neuron dimension 
+
+    # data alignment 
+    for r in tqdm(range(order)):
+        if r == 0: 
+            for t in range(d):
+                U_align += W[:, t].unsqueeze(1) * analog_layer_input[:, t].unsqueeze(0)
+                norm = torch.linalg.norm(quantized_layer_input[:, t], 2) ** 2
+                if norm > 0:
+                    W_align[:, t] = U_align.matmul(quantized_layer_input[:, t]) / norm
+                else: 
+                    W_align[:, t] = torch.zeros_like(U_align[:, 0])
+                U_align -= W_align[:, t].unsqueeze(1) * quantized_layer_input[:, t].unsqueeze(0) 
+        
+        else:
+            for t in range(d * r, d * (r + 1)):
+                mod = t % d
+                U_align += W_align[:, mod].unsqueeze(1) * quantized_layer_input[:, mod].unsqueeze(0) 
+                norm = torch.linalg.norm(quantized_layer_input[:, mod], 2) ** 2
+                if norm > 0:
+                    W_align[:, mod] = U_align.matmul(quantized_layer_input[:, mod]) / norm
+                else: 
+                    W_align[:, mod] = torch.zeros_like(U_align[:, 0])
+                U_align -= W_align[:, mod].unsqueeze(1) * quantized_layer_input[:, mod].unsqueeze(0)
+    
+    # quantization
+    for t in tqdm(range(d)):
+        norm = torch.linalg.norm(quantized_layer_input[:, t], 2) ** 2
+        if norm > 0:
+            q_arg = W_align[:, t] + U.matmul(quantized_layer_input[:, t]) / norm
+        else: 
+            q_arg = W_align[:, t]
+        Q[:, t] = quantizer(step_size, q_arg, boundary_idx, lamb)
+        U += (W_align[:, t] - Q[:, t]).unsqueeze(1) * quantized_layer_input[:, t].unsqueeze(0)
+    
+    U += U_align  # accumulate the error 
+
+    del W_align, U_align
+    torch.cuda.empty_cache()
+    gc.collect() 
+
+
 def quantize_layer(W, analog_layer_input, quantized_layer_input, m, 
-                    step_size, boundary_idx, percentile,
-                    reg, lamb, groups, stochastic_quantization, device):
+                    step_size, boundary_idx, percentile, reg, lamb, 
+                    groups, stochastic_quantization, order, device):
     '''
     Quantize one layer in parallel.
 
@@ -77,6 +152,8 @@ def quantize_layer(W, analog_layer_input, quantized_layer_input, m,
         Num of grouped convolution that is used (only for Conv layers).
     stochastic_quantization: bool
         Whether or not to use stochastic quantization
+    order: int
+        The order of data alignment process 
     device: torch.device
         CUDA or CPU
 
@@ -110,9 +187,13 @@ def quantize_layer(W, analog_layer_input, quantized_layer_input, m,
 
     print(f'The number of groups: {groups}\n')
 
-    if groups == 1: # no group convolutio
-        quantization(W, Q, U, analog_layer_input, quantized_layer_input, quantizer, 
-                  step_size, boundary_idx, lamb)
+    if groups == 1: # no group convolution
+        if order == 1:
+            quantization(W, Q, U, analog_layer_input, quantized_layer_input, quantizer, 
+                    step_size, boundary_idx, lamb)
+        else:
+            quantization_with_alignment(W, Q, U, order, analog_layer_input, quantized_layer_input, quantizer, 
+                    step_size, boundary_idx, lamb)
 
         quantize_adder = U.T
         relative_adder = torch.linalg.norm(quantize_adder, axis=0) / (torch.linalg.norm(analog_layer_input @ W.T, axis=0) + 1e-5)
@@ -134,9 +215,13 @@ def quantize_layer(W, analog_layer_input, quantized_layer_input, m,
         relative_quantize_error = 0
 
         for i in range(groups):
-            quantization(W[i], Q[i], U[i], analog_layer_input[:,i,:], quantized_layer_input[:,i,:], quantizer, 
-                  step_size, boundary_idx, lamb)
-
+            if order == 1:
+                quantization(W[i], Q[i], U[i], analog_layer_input[:,i,:], quantized_layer_input[:,i,:], quantizer, 
+                    step_size, boundary_idx, lamb)
+            else:
+                quantization_with_alignment(W[i], Q[i], U[i], order, analog_layer_input[:,i,:], quantized_layer_input[:,i,:], quantizer, 
+                    step_size, boundary_idx, lamb)
+            
             quantize_error += torch.linalg.norm(U[i].T, ord='fro') 
             relative_quantize_error += torch.linalg.norm(U[i].T, ord='fro') / torch.linalg.norm(analog_layer_input[:,i,:] @ W[i].T, ord='fro')
 

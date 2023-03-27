@@ -5,10 +5,9 @@ import torch.nn.functional as F
 import numpy as np
 import copy
 import gc
-import os
 
 from tqdm import tqdm
-from utils import InterruptException, extract_layers
+from ..utils import InterruptException, extract_layers
 from .quantize_layer import quantize_layer
 from .quantizer import msq
 
@@ -33,7 +32,7 @@ class QuantizeNeuralNet:
                  mlp_bits, cnn_bits, act_bits, ignore_layers, 
                  mlp_alphabet_scalar, cnn_alphabet_scalar,
                  mlp_percentile, cnn_percentile, reg, lamb, retain_rate, 
-                 stochastic_quantization, quan_act, device, calib_loader):
+                 stochastic_quantization, quan_act, order, device, calib_loader):
         '''
         Init the object that is used for quantizing the given neural net.
         Parameters
@@ -72,6 +71,8 @@ class QuantizeNeuralNet:
             Whether to use stochastic quantization or not
         quan_act: bool
             Whether to quantize activations
+        order: int
+            The order of data alignment process 
         device: torch.device
             CUDA or CPU
         calib_loader: function,
@@ -107,6 +108,7 @@ class QuantizeNeuralNet:
         
         self.reg = reg
         self.lamb = lamb
+        self.order = order
         self.device = device
         
         self.quantized_network = copy.deepcopy(self.analog_network)
@@ -187,6 +189,7 @@ class QuantizeNeuralNet:
                                                 self.mlp_percentile,
                                                 self.reg, self.lamb,
                                                 groups, self.stochastic_quantization,
+                                                self.order, 
                                                 self.device
                                                 )
 
@@ -217,6 +220,7 @@ class QuantizeNeuralNet:
                                             self.cnn_percentile,
                                             self.reg, self.lamb,
                                             groups, self.stochastic_quantization,
+                                            self.order, 
                                             self.device
                                             )
                 
