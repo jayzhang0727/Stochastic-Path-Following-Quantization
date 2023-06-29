@@ -66,7 +66,24 @@ def quantization(W, Q, U, analog_layer_input, quantized_layer_input, quantizer,
     stochastic_quantization: bool
         Whether or not to use stochastic quantization
     '''
+    # ###### Quantization with reordering #####
+    # Index = torch.argsort(W.abs(), dim=1, descending=True)
+    
+    # for t in tqdm(range(W.shape[1])):
+    #     idx = Index[:, t]  # reordered indices
+    #     U += torch.transpose(analog_layer_input[:, idx], 0, 1) * torch.gather(W, 1, idx.unsqueeze(1))
+    #     norm = torch.linalg.norm(quantized_layer_input[:, idx], dim=0, ord=2) ** 2
+    #     inner_prod = U.unsqueeze(1).matmul(torch.transpose(quantized_layer_input[:, idx], 0, 1).unsqueeze(2)).flatten() 
 
+    #     q_arg = torch.zeros_like(U[:, 0])
+    #     mask = (norm > 0)
+    #     q_arg[mask] = inner_prod[mask] / norm[mask]
+
+    #     Q[torch.arange(Q.size(0)), idx] = quantizer(step_size, q_arg, boundary_idx, lamb)
+    #     U -= torch.transpose(quantized_layer_input[:, idx], 0, 1) * torch.gather(Q, 1, idx.unsqueeze(1))
+    
+    
+### Quantization without reordering #######
     for t in tqdm(range(W.shape[1])):
         U += W[:, t].unsqueeze(1) * analog_layer_input[:, t].unsqueeze(0)
         norm = torch.linalg.norm(quantized_layer_input[:, t], 2) ** 2
@@ -74,6 +91,7 @@ def quantization(W, Q, U, analog_layer_input, quantized_layer_input, quantizer,
             q_arg = U.matmul(quantized_layer_input[:, t]) / norm
         else: 
             q_arg = torch.zeros_like(U[:, 0])
+    
         Q[:, t] = quantizer(step_size, q_arg, boundary_idx, lamb)
         U -= Q[:, t].unsqueeze(1) * quantized_layer_input[:, t].unsqueeze(0)
 
@@ -248,5 +266,6 @@ def quantize_layer(W, analog_layer_input, quantized_layer_input, m,
     del U
     torch.cuda.empty_cache()
     gc.collect() 
+    
     return Q, quantize_error, relative_quantize_error, quantize_adder, relative_adder
                 
